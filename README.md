@@ -2,8 +2,8 @@
 
 为 Windows 批处理文件（`.bat` / `.cmd`）提供**文件与目录路径自动补全**的 Notepad++ 插件。
 
-移植自 VS Code 扩展 [bat-path-intellisense](https://github.com/nicehero/bat-path-intellisense)
-（`D:\proj\bat-path-intellisense`），行为与原扩展保持一致。
+移植自 VS Code 扩展 [bat-path-intellisense](https://github.com/nicehero/bat-path-intellisense)，
+行为与原扩展保持一致。
 
 写 `copy`、`xcopy`、`del`、`call` 这类命令时，只要输入 `.\`、`..\`、`C:\` 或 `\\server\share\`，
 就会自动列出对应目录下的文件和文件夹。
@@ -61,56 +61,6 @@ Notepad++ 7.6+ 按 `<插件目录>\<文件夹名>\<文件夹名>.dll` 的约定�
 装好后启动 Notepad++，在 **插件** 菜单里应能看到 `BatPathIntelliSense`。
 
 > 安装前请先关闭 Notepad++ —— 它在运行时会锁住已加载的 DLL，复制会失败。
-
-## 发布到「插件管理」
-
-Notepad++ **没有** VS Code `vsce publish` 那样的一键上传。机制是：Notepad++ 的插件管理
-从 `notepad-plus-plus/nppPluginList` 仓库读一份清单（JSON 封装成签名 DLL 分发），
-清单里的 `repository` 字段直接指向你自己 GitHub Release 上的 zip。
-
-三份清单互相独立：`pl.x86.json` / `pl.x64.json` / `pl.arm64.json`。
-**只发 x64 完全可以**——现有清单里就有 12 个插件只存在于 x64。
-
-### 打包
-
-先改 `tools/package.ps1` 顶部 identity 那一段的 `GitHubOwner` / `RepoName` / `Author`
-（默认值是按 VS Code 扩展的发布者 `nicehero` 填的，**务必确认改成你自己的**）。
-
-```bat
-package.bat
-```
-
-它会：编译 → 打包 zip → 算出 SHA-256 → 打印可直接粘贴的 JSON 条目 →
-跑一遍 `tools/preflight.py` 模拟上游校验。产物：
-
-- `build\BatPathIntelliSense_x64.zip` —— 要上传到 GitHub Release 的那个
-- `build\pl.x64.entry.json` —— 要加进 `pl.x64.json` 的那一条
-
-### 版本号
-
-版本号只在 **`src/BatPathIntelliSense.rc`** 里写一次，打包脚本从编好的 DLL 里反读，
-所以 JSON 条目和二进制不可能不一致。改版本改那里即可。
-
-### 上游 CI 的硬性要求
-
-这些是从 `nppPluginList` 的 `validator.py` 源码里读出来的：
-
-| 要求 | 说明 |
-| --- | --- |
-| `id` | **zip 文件**的 SHA-256。每次重新打包都会变（zip 内含时间戳），所以别在生成条目后又重新打包 |
-| zip 结构 | `<folder-name>.dll` 必须在 **zip 根目录**。套一层文件夹会校验失败，即使文件存在 |
-| 版本资源 | DLL 必须带 VERSIONINFO |
-| 版本一致性 | DLL 的 4 段 FILEVERSION 必须等于 JSON `version` 补齐到 4 段。即 JSON `"0.1.0"` ↔ DLL `0.1.0.0` |
-| 唯一性 | `folder-name`、`display-name`、`repository` 不能与现有条目重复 |
-
-### 提交
-
-1. 把 `BatPathIntelliSense_x64.zip` 传成 GitHub Release 资源，tag 为 `v<版本号>`
-   （与条目里 `repository` 的 URL 对应）。**确认那个 URL 直接返回 zip 而不是 HTML 页面。**
-2. fork `notepad-plus-plus/nppPluginList`，把条目加进 `src/pl.x64.json` 的 `npp-plugins` 数组，提 PR。
-
-发布新版本时：改 `.rc` 里的版本 → `package.bat` → 传新 Release → 更新清单里的
-`version`、`repository`、`id` 三个字段 → 再提一次 PR。
 
 ## 配置
 
@@ -182,7 +132,7 @@ src/PathCompletion.cpp   核心逻辑：路径提取 + 目录解析 + 枚举（�
 src/Plugin.cpp           导出函数、菜单、通知分发、延迟下钻
 src/Options.cpp          ini 配置读写
 src/Utf8.cpp             宽字符 <-> UTF-8
-sdk/                     Notepad++ 官方插件头文件（见下方来源）
+sdk/                     Notepad++ 官方插件头文件（来源见 DEVELOPMENT.md）
 test/TestPathCompletion.cpp   核心逻辑的独立测试
 ```
 
@@ -192,36 +142,8 @@ test/TestPathCompletion.cpp   核心逻辑的独立测试
 test.bat
 ```
 
-## 本机环境的三个坑
-
-搭建过程中真实踩到的，脚本里都已绕过，但值得记下来：
-
-1. **PATH 里 MinGW 排在 MSVC 前面。** `F:\mingw64\bin` 在 `F:\vs2015\VC\bin\amd64`
-   之前，而 MinGW 带了一个同名 `link.exe`（GNU coreutils 的**硬链接**工具）。
-   `cl` 编译完会按 PATH 去找链接器，于是把 MSVC 的链接参数喂给了它，
-   结果是刷屏的 `命令行 error D8000` 加上退出码 `0xC0000005` 崩溃。
-   脚本的处理是：把 MSVC 的 bin 目录提到 PATH 最前，并且用**绝对路径**调用链接器。
-
-2. **一次 `cl` 调用传多个源文件会崩。** 同样报 `0xC0000005`。逐个文件单独调用就正常，
-   所以 `build.bat` 一个文件编译一次，再单独链接。
-
-3. **源码里的中文注释必须配 `/utf-8`。** MSVC 默认按系统代码页（936）读源码，
-   而源文件是 UTF-8，不加 `/utf-8` 时带中文注释的三个文件全部编译失败
-   （无注释的 `Utf8.cpp` 则正常）。另外 `.bat` 文件本身只能写 ASCII ——
-   cmd 也按 OEM 代码页读取批处理。
-
-另外还有个容易误判的点：cmd 的 `if errorlevel N` 是**有符号**比较，
-而崩溃的工具返回的是负数退出码，会被判成"成功"。所以脚本最后直接检查产物文件是否存在。
-
-## 头文件来源
-
-`sdk/` 下的头文件取自 [npp-plugins/plugintemplate](https://github.com/npp-plugins/plugintemplate)。
-
-`SCNotification` 的字段布局在 Scintilla 各版本间变过，**不能凭记忆手写**：
-本机 Notepad++ 8.6.4 用的 `Sci_Position position` 是 8 字节（`ptrdiff_t`），
-所以 `ch` 在 x64 下位于**偏移 32** 而不是 24。写错的话 `SCN_CHARADDED` 读到的
-会是位置值而不是字符。已核对过：plugintemplate 的 `Scintilla.h` 与 Notepad++ `v8.6.4`
-标签下自带的 `scintilla/include/Scintilla.h` 字段序列完全一致。
+构建环境的注意事项、头文件来源、以及发布到 Notepad++ 插件管理的流程，
+见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## 许可证
 
