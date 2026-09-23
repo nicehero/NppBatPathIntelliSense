@@ -62,6 +62,56 @@ Notepad++ 7.6+ 按 `<插件目录>\<文件夹名>\<文件夹名>.dll` 的约定�
 
 > 安装前请先关闭 Notepad++ —— 它在运行时会锁住已加载的 DLL，复制会失败。
 
+## 发布到「插件管理」
+
+Notepad++ **没有** VS Code `vsce publish` 那样的一键上传。机制是：Notepad++ 的插件管理
+从 `notepad-plus-plus/nppPluginList` 仓库读一份清单（JSON 封装成签名 DLL 分发），
+清单里的 `repository` 字段直接指向你自己 GitHub Release 上的 zip。
+
+三份清单互相独立：`pl.x86.json` / `pl.x64.json` / `pl.arm64.json`。
+**只发 x64 完全可以**——现有清单里就有 12 个插件只存在于 x64。
+
+### 打包
+
+先改 `tools/package.ps1` 顶部 identity 那一段的 `GitHubOwner` / `RepoName` / `Author`
+（默认值是按 VS Code 扩展的发布者 `nicehero` 填的，**务必确认改成你自己的**）。
+
+```bat
+package.bat
+```
+
+它会：编译 → 打包 zip → 算出 SHA-256 → 打印可直接粘贴的 JSON 条目 →
+跑一遍 `tools/preflight.py` 模拟上游校验。产物：
+
+- `build\BatPathIntelliSense_x64.zip` —— 要上传到 GitHub Release 的那个
+- `build\pl.x64.entry.json` —— 要加进 `pl.x64.json` 的那一条
+
+### 版本号
+
+版本号只在 **`src/BatPathIntelliSense.rc`** 里写一次，打包脚本从编好的 DLL 里反读，
+所以 JSON 条目和二进制不可能不一致。改版本改那里即可。
+
+### 上游 CI 的硬性要求
+
+这些是从 `nppPluginList` 的 `validator.py` 源码里读出来的：
+
+| 要求 | 说明 |
+| --- | --- |
+| `id` | **zip 文件**的 SHA-256。每次重新打包都会变（zip 内含时间戳），所以别在生成条目后又重新打包 |
+| zip 结构 | `<folder-name>.dll` 必须在 **zip 根目录**。套一层文件夹会校验失败，即使文件存在 |
+| 版本资源 | DLL 必须带 VERSIONINFO |
+| 版本一致性 | DLL 的 4 段 FILEVERSION 必须等于 JSON `version` 补齐到 4 段。即 JSON `"0.1.0"` ↔ DLL `0.1.0.0` |
+| 唯一性 | `folder-name`、`display-name`、`repository` 不能与现有条目重复 |
+
+### 提交
+
+1. 把 `BatPathIntelliSense_x64.zip` 传成 GitHub Release 资源，tag 为 `v<版本号>`
+   （与条目里 `repository` 的 URL 对应）。**确认那个 URL 直接返回 zip 而不是 HTML 页面。**
+2. fork `notepad-plus-plus/nppPluginList`，把条目加进 `src/pl.x64.json` 的 `npp-plugins` 数组，提 PR。
+
+发布新版本时：改 `.rc` 里的版本 → `package.bat` → 传新 Release → 更新清单里的
+`version`、`repository`、`id` 三个字段 → 再提一次 PR。
+
 ## 配置
 
 配置存在 Notepad++ 的插件配置目录下：

@@ -46,6 +46,10 @@ if not "%errorlevel%"=="0" goto no_toolchain
 rem See trap 1.
 set "PATH=%VCBIN%;%PATH%"
 
+rem rc.exe (Windows SDK) is needed for the version resource.
+where rc >nul 2>&1
+if not "!errorlevel!"=="0" goto no_rc
+
 echo === compiling ===
 rem See trap 2: one file per invocation.
 for %%F in (Utf8 PathCompletion Options Plugin) do (
@@ -54,9 +58,16 @@ for %%F in (Utf8 PathCompletion Options Plugin) do (
     if not "!errorlevel!"=="0" goto build_failed
 )
 
+echo === version resource ===
+rem nppPluginList requires the DLL to carry a version resource, and the version
+rem to match the list entry. rc.exe lives in the Windows SDK bin dir, which
+rem vcvarsall puts on PATH.
+rc /nologo /fo"%OUTDIR%\BatPathIntelliSense.res" "%SRCDIR%\BatPathIntelliSense.rc"
+if not "%errorlevel%"=="0" goto build_failed
+
 echo === linking ===
 rem See trap 1: absolute path, not a PATH lookup.
-"%VCBIN%\link.exe" /nologo /DLL /OUT:"%OUTDIR%\BatPathIntelliSense.dll" /MACHINE:X64 "%OUTDIR%\Utf8.obj" "%OUTDIR%\PathCompletion.obj" "%OUTDIR%\Options.obj" "%OUTDIR%\Plugin.obj" user32.lib kernel32.lib
+"%VCBIN%\link.exe" /nologo /DLL /OUT:"%OUTDIR%\BatPathIntelliSense.dll" /MACHINE:X64 "%OUTDIR%\Utf8.obj" "%OUTDIR%\PathCompletion.obj" "%OUTDIR%\Options.obj" "%OUTDIR%\Plugin.obj" "%OUTDIR%\BatPathIntelliSense.res" user32.lib kernel32.lib
 if not "%errorlevel%"=="0" goto build_failed
 
 rem A crashing tool reports a negative exit code, and cmd's "if errorlevel N"
@@ -69,6 +80,11 @@ exit /b 0
 
 :no_toolchain
 echo [x] toolchain not found. Check VCVARS / VCBIN in this file.
+exit /b 1
+
+:no_rc
+echo [x] rc.exe not found on PATH -- it ships with the Windows SDK and is
+echo     normally set up by vcvarsall.bat.
 exit /b 1
 
 :build_failed
